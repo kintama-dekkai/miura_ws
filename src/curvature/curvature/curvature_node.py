@@ -13,9 +13,10 @@ class Curvature(Node):
         self.sub_cmd_vel = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_cb, 10)
         self.led_signal_pub = self.create_publisher(String,'/blinker_led_command',10)
 
-        self.k_on = 0.15 #Siriusは0.1くらいがいいかな？予想
-        self.k_off = 0.07
-        self.a = 1.0
+        self.k_on = 0.11 #Siriusは0.1くらいがいいかな？予想
+        self.k_off = 0.05
+        self.a = 0.85
+        self.d_ref = 2.4
 
         self.k_smooth = 0.0
         self.led_signal = String()
@@ -60,31 +61,30 @@ class Curvature(Node):
     def optimal_trajectory_cb(self,msg:Path):
         if len(msg.poses) < 3:
             return
-            
-        pose_stamped = msg.poses
-        self.k_new = self.curvature_from_three_points(pose_stamped)
-        self.k_smooth = self.a * self.k_new + (1 - self.a) * self.k_smooth
-
-        if self.k_smooth > self.k_on:
-            self.led_signal.data = 'left'
-
-        elif self.k_smooth < -self.k_on:
-            self.led_signal.data = 'right'
-
-        #しきい値うろちょろ問題解決用
-        elif self.led_signal.data == 'left' and self.k_smooth < self.k_off:
-            self.led_signal.data = 'straight'
-
-        elif self.led_signal.data == 'right' and self.k_smooth > -self.k_off:
-            self.led_signal.data = 'straight'
-
 
         start = msg.poses[0].pose.position
         end = msg.poses[-1].pose.position
-
         unko = math.hypot(start.x - end.x, start.y - end.y)
+            
+        pose_stamped = msg.poses
+        k_raw = self.curvature_from_three_points(pose_stamped)
 
-        self.get_logger().info(f'{self.led_signal.data}, {self.k_smooth}, {len(msg.poses)}, {unko}')
+        scale = max(unko,1e-6) / self.d_ref 
+        k_new = k_raw * scale
+
+        self.k_smooth = self.a * k_new + (1 - self.a) * self.k_smooth
+
+        if self.k_smooth > self.k_on:
+            self.led_signal.data = 'left'
+        elif self.k_smooth < -self.k_on:
+            self.led_signal.data = 'right'
+        #しきい値うろちょろ問題解決用
+        elif self.led_signal.data == 'left' and self.k_smooth < self.k_off:
+            self.led_signal.data = 'straight'
+        elif self.led_signal.data == 'right' and self.k_smooth > -self.k_off:
+            self.led_signal.data = 'straight'
+
+        self.get_logger().info(f'{self.led_signal.data}, {self.k_smooth:.3f}, {len(msg.poses)}, {unko:.3f}')
 
         if self.led_signal.data != self.last_led_signal:
             self.led_signal_pub.publish(self.led_signal)
