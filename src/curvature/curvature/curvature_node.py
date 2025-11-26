@@ -6,16 +6,16 @@ from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 
 
-class Curvature_local(Node):
+class Curvature(Node):
     def __init__(self):
         super().__init__('Curvature_local')
         self.sub1 = self.create_subscription(Path ,'/optimal_trajectory',self.optimal_trajectory_cb, 10)
         self.sub_cmd_vel = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_cb, 10)
         self.led_signal_pub = self.create_publisher(String,'/blinker_led_command',10)
 
-        self.k_on = 1.0 #Siriusは0.1くらいがいいかな？予想
-        self.k_off = 0.5
-        self.a = 0.7
+        self.k_on = 0.15 #Siriusは0.1くらいがいいかな？予想
+        self.k_off = 0.07
+        self.a = 1.0
 
         self.k_smooth = 0.0
         self.led_signal = String()
@@ -29,7 +29,7 @@ class Curvature_local(Node):
         max_area = 0.0
         k = 0
         cross = 0
-        unko = []
+        self.zero = 0
 
         for i in range(len(pose_stamped) - 2):
             (x1,y1) = pose_stamped[i].pose.position.x, pose_stamped[i].pose.position.y
@@ -37,7 +37,9 @@ class Curvature_local(Node):
             (x3,y3) = pose_stamped[i+2].pose.position.x, pose_stamped[i+2].pose.position.y
             
             area = 0.5 * abs(x1*(y2-y3) + x2*(y3-y1) + x3*(y1-y2))
-            if area > max_area:
+            if area == 0:
+                self.zero +=1
+            elif area > max_area:
                 a = math.hypot(x2-x1, y2-y1)
                 b = math.hypot(x3-x2, y3-y2)
                 c = math.hypot(x3-x1, y3-y1)
@@ -49,8 +51,6 @@ class Curvature_local(Node):
                 cross = v1x * v2y - v1y * v2x
                 if k == 0:
                     continue
-                unko.append(math.copysign(int(k * 1000), cross))
-        self.get_logger().info(f'{unko}')
         return math.copysign(k, cross)
 
 
@@ -75,7 +75,13 @@ class Curvature_local(Node):
         elif self.led_signal.data == 'right' and self.k_smooth > -self.k_off:
             self.led_signal.data = 'straight'
 
-        self.get_logger().info(f'{self.led_signal.data}, {self.k_smooth}, {len(msg.poses)}')
+
+        start = msg.poses[0].pose.position
+        end = msg.poses[-1].pose.position
+
+        unko = math.hypot(start.x - end.x, start.y - end.y)
+
+        self.get_logger().info(f'{self.led_signal.data}, {self.k_smooth}, {len(msg.poses)}, {self.zero}, {unko}')
 
         if self.led_signal.data != self.last_led_signal:
             self.led_signal_pub.publish(self.led_signal)
@@ -86,14 +92,14 @@ class Curvature_local(Node):
         self.lin_x = msg.linear.x
         self.ang_z = msg.angular.z
         if self.lin_x == 0 and self.ang_z != 0:
-            self.led_signal_pub.publish(String(data = "turning"))
+            self.led_signal.data = 'turning'
             
         
 
 
 def main(args=None):
    rclpy.init(args=args)
-   node = Curvature_local()
+   node = Curvature()
    rclpy.spin(node)
    node.destroy_node()
    rclpy.shutdown()
