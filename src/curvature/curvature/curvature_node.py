@@ -26,31 +26,34 @@ class Curvature(Node):
 
 
     def curvature_from_three_points(self,pose_stamped):
-        max_area = 0.0
         k = 0
         cross = 0
-        self.zero = 0
 
-        for i in range(len(pose_stamped) - 2):
-            (x1,y1) = pose_stamped[i].pose.position.x, pose_stamped[i].pose.position.y
-            (x2,y2) = pose_stamped[i+1].pose.position.x, pose_stamped[i+1].pose.position.y
-            (x3,y3) = pose_stamped[i+2].pose.position.x, pose_stamped[i+2].pose.position.y
+        (x1,y1) = pose_stamped[0].pose.position.x, pose_stamped[0].pose.position.y
+        (x2,y2) = pose_stamped[len(pose_stamped)//2].pose.position.x, pose_stamped[len(pose_stamped)//2].pose.position.y
+        (x3,y3) = pose_stamped[-1].pose.position.x, pose_stamped[-1].pose.position.y
             
-            area = 0.5 * abs(x1*(y2-y3) + x2*(y3-y1) + x3*(y1-y2))
-            if area == 0:
-                self.zero +=1
-            elif area > max_area:
-                a = math.hypot(x2-x1, y2-y1)
-                b = math.hypot(x3-x2, y3-y2)
-                c = math.hypot(x3-x1, y3-y1)
-                R = (a*b*c) / (4.0 * area)
-                k = 1.0 / R
-                # sign from cross product of vectors (p2-p1) x (p3-p2)
-                v1x, v1y = x2 - x1, y2 - y1
-                v2x, v2y = x3 - x2, y3 - y2
-                cross = v1x * v2y - v1y * v2x
-                if k == 0:
-                    continue
+        area = 0.5 * abs(x1*(y2-y3) + x2*(y3-y1) + x3*(y1-y2))
+
+        eps = 1e-6
+        if area < eps:
+            return 0.0
+
+        a = math.hypot(x2-x1, y2-y1)
+        b = math.hypot(x3-x2, y3-y2)
+        c = math.hypot(x3-x1, y3-y1)
+
+        if a < eps or b < eps or c < eps:
+            return 0.0
+
+        R = (a*b*c) / (4.0 * area)
+        k = 1.0 / R
+        # sign from cross product of vectors (p2-p1) x (p3-p2)
+        v1x, v1y = x2 - x1, y2 - y1
+        v2x, v2y = x3 - x2, y3 - y2
+        cross = v1x * v2y - v1y * v2x
+        if k == 0:
+            return 0
         return math.copysign(k, cross)
 
 
@@ -81,7 +84,7 @@ class Curvature(Node):
 
         unko = math.hypot(start.x - end.x, start.y - end.y)
 
-        self.get_logger().info(f'{self.led_signal.data}, {self.k_smooth}, {len(msg.poses)}, {self.zero}, {unko}')
+        self.get_logger().info(f'{self.led_signal.data}, {self.k_smooth}, {len(msg.poses)}, {unko}')
 
         if self.led_signal.data != self.last_led_signal:
             self.led_signal_pub.publish(self.led_signal)
