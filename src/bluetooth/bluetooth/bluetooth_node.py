@@ -87,7 +87,7 @@ class BLEControlNode(Node):
                 return
             
             if self.left_command is None or self.right_command is None:
-                self.get_logger().info("贈り物がないあめ二ダ")
+                self.get_logger().info("No signal")
                 return
             
             if not self.blinking_mode or self.last:
@@ -99,7 +99,6 @@ class BLEControlNode(Node):
                 asyncio.run_coroutine_threadsafe(self.right_client.write_gatt_char(CHAR_UUID, 'C:0,0,0'.encode('utf-8')),self.loop)
                 self.last = True
                      
-
 
     async def connect_both(self):
         await self.connect_ble(LEFT,"left")
@@ -114,7 +113,7 @@ class BLEControlNode(Node):
             self.right_connect = False
         while True:
             try:
-                print(f"{side}:じゅんびちゅう")
+                print(f"{side}:preparation")
                 client = BleakClient(ADDRESS)
 
                 await client.connect()

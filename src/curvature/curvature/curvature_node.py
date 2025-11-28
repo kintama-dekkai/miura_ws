@@ -29,6 +29,7 @@ class Curvature(Node):
     def curvature_from_three_points(self,pose_stamped, destance):
         eps = 1e-6
         self.state = None
+        self.area = None
 
         (x1,y1) = pose_stamped[0].pose.position.x, pose_stamped[0].pose.position.y
         (x2,y2) = pose_stamped[len(pose_stamped)//2].pose.position.x, pose_stamped[len(pose_stamped)//2].pose.position.y
@@ -38,34 +39,30 @@ class Curvature(Node):
         if destance < 0.5:
             self.state = 'destance'
             return 0.0
-        #三角形の高さが低い時は曲率0とする
-        num = abs((y3 - y1)*x2 - (x3 - x1)*y2 + x3*y1 - y3*x1)
-        den = ((y3 - y1)**2 + (x3 - x1)**2)**0.5
-        if num / den < 1e-6:
-            self.state = 'num / den'
-            return 0.0     
         #面積が小さいときは曲率0とする
-        area = 0.5 * abs(x1*(y2-y3) + x2*(y3-y1) + x3*(y1-y2))
-        if area < eps:
+        self.area = 0.5 * abs(x1*(y2-y3) + x2*(y3-y1) + x3*(y1-y2))
+        if self.area < eps:
             self. state = 'area'
             return 0.0 
         #辺の長さが短いときは曲率0とする
         a = math.hypot(x2-x1, y2-y1)
         b = math.hypot(x3-x2, y3-y2)
         c = math.hypot(x3-x1, y3-y1)
+
         if a < eps or b < eps or c < eps:
             self.state = 'a,b,c'
             return 0.0
 
-        R = (a*b*c) / (4.0 * area)
+        R = (a*b*c) / (4.0 * self.area)
         k = 1.0 / R
         # 外積で向きを判定
         v1x, v1y = x2 - x1, y2 - y1
         v2x, v2y = x3 - x2, y3 - y2
         cross = v1x * v2y - v1y * v2x
         if k == 0:
-            self.state = 'k'
+            self.state = 'k = 0'
             return 0.0
+
         return math.copysign(k, cross)
 
 
@@ -75,12 +72,12 @@ class Curvature(Node):
 
         start = msg.poses[0].pose.position
         end = msg.poses[-1].pose.position
-        unko = math.hypot(start.x - end.x, start.y - end.y)
+        destance = math.hypot(start.x - end.x, start.y - end.y)
             
         pose_stamped = msg.poses
-        k_raw = self.curvature_from_three_points(pose_stamped, unko)
+        k_raw = self.curvature_from_three_points(pose_stamped, destance)
 
-        scale = max(unko,1e-6) / self.d_ref
+        scale = max(destance,1e-6) / self.d_ref
         k_new = k_raw * scale
 
         self.k_smooth = self.a * k_new + (1 - self.a) * self.k_smooth
@@ -95,22 +92,26 @@ class Curvature(Node):
         elif self.led_signal.data == 'right' and self.k_smooth > -self.k_off:
             self.led_signal.data = 'straight'
 
-        self.get_logger().info(f'{self.led_signal.data}, {self.k_smooth:.3f}, {k_raw:.3f}, {unko:.3f}, {self.state}')
+        self.get_logger().info(f'{self.led_signal.data}, {self.k_smooth:.3f}, {k_raw:.3f}, {destance:.3f}, {self.state}, {self.area},')
 
-        #最後にpublishしたdataと違うときだけpublish
-        if self.led_signal.data != self.last_led_signal:
-            self.led_signal_pub.publish(self.led_signal)
-            self.last_led_signal = self.led_signal.data
+        
 
 
     #cmd_velを監視して、旋回中はturningにする
     def cmd_vel_cb(self, msg:Twist):
         self.lin_x = msg.linear.x
         self.ang_z = msg.angular.z
-        if self.lin_x < 0.06 and self.ang_z != 0:
+        if self.lin_x == self.ang_z == 0.0:
+            self.led_signal.data = 'stop'
+        elif self.lin_x < 0.06 and self.ang_z != 0:
             self.led_signal.data = 'turning'
         elif self.led_signal.data == 'turning':
             self.led_signal.data = 'straight'
+
+        #最後にpublishしたdataと違うときだけpublish
+        if self.led_signal.data != self.last_led_signal:
+            self.led_signal_pub.publish(self.led_signal)
+            self.last_led_signal = self.led_signal.data
             
 
 def main(args=None):
