@@ -9,6 +9,7 @@ class Pub(Node):
         self.sub = self.create_subscription(String ,'/blinker_led_command',self.led_cb,  10)
         #self.timer = self.create_timer(0.5, self.timer_cb)
         self.command = None
+        self.get_logger().info('pub_node started')
 
     def led_cb(self, msg:String):
         if msg.data == 'left':
@@ -26,6 +27,7 @@ class Pub(Node):
 
 def main(args=None):
    rclpy.init(args=args)
+   print('unko')
    node = Pub()
    rclpy.spin(node)
    node.destroy_node()

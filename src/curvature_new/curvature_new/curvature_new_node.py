@@ -5,59 +5,70 @@ from nav_msgs.msg import Path
 from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 
-
-class Curvature(Node):
+class CurvatureNew(Node):
     def __init__(self):
-        super().__init__('Curvature_local')
+        super().__init__('CurvatureNew_local')
         self.sub1 = self.create_subscription(Path ,'/optimal_trajectory',self.optimal_trajectory_cb, 10)
         self.sub_cmd_vel = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_cb, 10)
         self.led_signal_pub = self.create_publisher(String,'/blinker_led_command',10)
 
-        self.k_on = 0.11 #Siriusは0.1くらいがいいかな？予想
+        self.k_on = 0.20
         self.k_off = 0.05
         self.a = 0.85
-        self.d_ref = 2.4
+        self.distance_threshold = 0.5
 
         self.k_smooth = 0.0
         self.led_signal = String()
         self.led_signal.data = 'straight'
         self.last_led_signal = None
-        self.optimal_flarg = False
+        self.optimal_flag = False
         self.minimum_area = 10
 
-        self.get_logger().info('turnsignal, curvature, k_raw, destance, state')
+        self.get_logger().info('turnsignal, curvature, distance, state, area')
 
-
-    def curvature_from_three_points(self,pose_stamped, destance):
+    def curvature_from_three_points(self,pose_stamped, length):
         eps = 1e-6
+        middle = len(pose_stamped) // 2 - 1
         self.state = None
         self.area = None
 
-        (x1,y1) = pose_stamped[0].pose.position.x, pose_stamped[0].pose.position.y
-        (x2,y2) = pose_stamped[len(pose_stamped)//2].pose.position.x, pose_stamped[len(pose_stamped)//2].pose.position.y
-        (x3,y3) = pose_stamped[-1].pose.position.x, pose_stamped[-1].pose.position.y
-
-        #始点と終点の距離が近いときは曲率0とする
-        if destance < 0.5:
-            self.state = 'destance'
-            self.optimal_flarg = True
+        if length < 0.5:
+            self.state = 'distance'
+            self.optimal_flag = True
             return 0.0
-        #面積が小さいときは曲率0とする
+
+        (x2,y2) = pose_stamped[middle].pose.position.x, pose_stamped[middle].pose.position.y
+        
+        i = middle
+        distance = 0.0
+        while i > 0:
+            (a1, a2) = pose_stamped[i].pose.position.x, pose_stamped[i].pose.position.y
+            (b1, b2) = pose_stamped[i-1].pose.position.x, pose_stamped[i-1].pose.position.y
+            distance += math.hypot(a1 - b1, a2 - b2)
+            if distance > self.distance_threshold:
+                break
+            i -= 1
+        (x1, y1) = b1,b2
+
+        i = middle
+        distance = 0.0
+        while i < len(pose_stamped) - 1:
+            (a1, a2) = pose_stamped[i].pose.position.x, pose_stamped[i].pose.position.y
+            (b1, b2) = pose_stamped[i+1].pose.position.x, pose_stamped[i+1].pose.position.y
+            distance += math.hypot(b1 - a1, b2 - a2)
+            if distance > self.distance_threshold:
+                break
+            i += 1
+        (x3, y3) = b1, b2
+
         self.area = 0.5 * abs(x1*(y2-y3) + x2*(y3-y1) + x3*(y1-y2))
-        if self.minimum_area > self.area:
-            self.minimum_area = self.area
+        #面積が小さいときは曲率0とする
         if self.area < eps:
             self. state = 'area'
             return 0.0 
-        #辺の長さが短いときは曲率0とする
         a = math.hypot(x2-x1, y2-y1)
         b = math.hypot(x3-x2, y3-y2)
         c = math.hypot(x3-x1, y3-y1)
-
-        if a < eps or b < eps or c < eps:
-            self.state = 'a,b,c'
-            return 0.0
-
         R = (a*b*c) / (4.0 * self.area)
         k = 1.0 / R
         # 外積で向きを判定
@@ -81,10 +92,7 @@ class Curvature(Node):
         destance = math.hypot(start.x - end.x, start.y - end.y)
             
         pose_stamped = msg.poses
-        k_raw = self.curvature_from_three_points(pose_stamped, destance)
-
-        scale = max(destance,1e-6) / self.d_ref
-        k_new = k_raw * scale
+        k_new = self.curvature_from_three_points(pose_stamped, destance)
 
         self.k_smooth = self.a * k_new + (1 - self.a) * self.k_smooth
 
@@ -99,7 +107,7 @@ class Curvature(Node):
             self.led_signal.data = 'straight'
 
 
-        self.get_logger().info(f'{self.led_signal.data}, {self.k_smooth:.3f}, {k_raw:.3f}, {destance:.3f}, {self.state}, {self.area}, {self.minimum_area}')
+        self.get_logger().info(f'{self.led_signal.data}, {self.k_smooth:.3f}, {destance:.3f}, {self.state}, {self.area}')
 
 
     #cmd_velを監視して、旋回中はturningにする
@@ -117,15 +125,14 @@ class Curvature(Node):
         if self.led_signal.data != self.last_led_signal:
             self.led_signal_pub.publish(self.led_signal)
             self.last_led_signal = self.led_signal.data
-            
+
 
 def main(args=None):
     rclpy.init(args=args)
-    node = Curvature()
-    rclpy.spin(node)
-    node.destroy_node()
+    curvature_new_node = CurvatureNew()
+    rclpy.spin(curvature_new_node)
+    curvature_new_node.destroy_node()
     rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()
