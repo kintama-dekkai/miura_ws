@@ -1,0 +1,19 @@
+digraph G {
+"sirius3/base_link" -> "sirius3/left_wheel"[label=" Broadcaster: default_authority\nAverage rate: 64.361\nBuffer length: 2.284\nMost recent transform: 111137.516\nOldest transform: 111135.232\n"];
+"sirius3/base_footprint" -> "sirius3/base_link"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"sirius3/base_link" -> "sirius3/right_wheel"[label=" Broadcaster: default_authority\nAverage rate: 64.361\nBuffer length: 2.284\nMost recent transform: 111137.516\nOldest transform: 111135.232\n"];
+"sirius3/lidar_link" -> "sirius3/ear_left"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"sirius3/base_link" -> "sirius3/lidar_link"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"sirius3/lidar_link" -> "sirius3/ear_right"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"sirius3/odom" -> "sirius3/base_footprint"[label=" Broadcaster: default_authority\nAverage rate: 20.645\nBuffer length: 1.55\nMost recent transform: 111137.519\nOldest transform: 111135.969\n"];
+"sirius3/base_link" -> "sirius3/imu_link"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"sirius3/base_link" -> "sirius3/lidar_link2"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"sirius3/realsense_link" -> "sirius3/realsense_color_optical_frame"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"sirius3/base_link" -> "sirius3/realsense_link"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"sirius3/realsense_link" -> "sirius3/realsense_depth_optical_frame"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"map" -> "sirius3/odom"[label=" Broadcaster: default_authority\nAverage rate: 10.0\nBuffer length: 2.1\nMost recent transform: 111138.5\nOldest transform: 111136.4\n"];
+edge [style=invis];
+ subgraph cluster_legend { style=bold; color=black; label ="view_frames Result";
+"Recorded at time: 1765108245.5985157"[ shape=plaintext ] ;
+}->"map";
+}

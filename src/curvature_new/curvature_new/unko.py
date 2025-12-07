@@ -15,7 +15,7 @@ class CurvatureNew(Node):
         self.k_on = 0.20
         self.k_off = 0.05
         self.a = 0.85
-        distance_threshold = 0.5
+        self.distance_threshold = 0.5
 
         self.k_smooth = 0.0
         self.led_signal = String()
@@ -26,12 +26,16 @@ class CurvatureNew(Node):
 
         self.get_logger().info('turnsignal, curvature, distance, state, area')
 
-    def curvature_from_three_points(self,pose_stamped, distance_threshold):
+    def curvature_from_three_points(self,pose_stamped, length):
         eps = 1e-6
         middle = len(pose_stamped) // 2 - 1
         self.state = None
         self.area = None
 
+        if length < 0.5:
+            self.state = 'distance'
+            self.optimal_flag = True
+            return 0.0
 
         (x2,y2) = pose_stamped[middle].pose.position.x, pose_stamped[middle].pose.position.y
         
@@ -41,7 +45,7 @@ class CurvatureNew(Node):
             (a1, a2) = pose_stamped[i].pose.position.x, pose_stamped[i].pose.position.y
             (b1, b2) = pose_stamped[i-1].pose.position.x, pose_stamped[i-1].pose.position.y
             distance += math.hypot(a1 - b1, a2 - b2)
-            if distance > distance_threshold:
+            if distance > self.distance_threshold:
                 break
             i -= 1
         (x1, y1) = b1,b2
@@ -52,7 +56,7 @@ class CurvatureNew(Node):
             (a1, a2) = pose_stamped[i].pose.position.x, pose_stamped[i].pose.position.y
             (b1, b2) = pose_stamped[i+1].pose.position.x, pose_stamped[i+1].pose.position.y
             distance += math.hypot(b1 - a1, b2 - a2)
-            if distance > distance_threshold:
+            if distance > self.distance_threshold:
                 break
             i += 1
         (x3, y3) = b1, b2
@@ -82,20 +86,28 @@ class CurvatureNew(Node):
         self.optimal_flarg = False
         if len(msg.poses) < 3:
             return
-        pose_stamped = msg.poses
 
         start = msg.poses[0].pose.position
         end = msg.poses[-1].pose.position
-        length = math.hypot(start.x - end.x, start.y - end.y)
+        destance = math.hypot(start.x - end.x, start.y - end.y)
+            
+        pose_stamped = msg.poses
+        k_new = self.curvature_from_three_points(pose_stamped, destance)
 
-        if length < 0.5:
-            self.state = 'distance'
-        else:
-            k_40 = self.curvature_from_three_points(pose_stamped, 40.0)
-            k_50 = self.curvature_from_three_points(pose_stamped, 50.0)
-            k_60 = self.curvature_from_three_points(pose_stamped, 60.0)
+        self.k_smooth = self.a * k_new + (1 - self.a) * self.k_smooth
 
-        self.get_logger().info(f'{k_40:.4f}, {k_50:.4f}, {k_60:.4f}, {length:.2f}, {self.state}')
+        if self.k_smooth > self.k_on:
+            self.led_signal.data = 'left'
+        elif self.k_smooth < -self.k_on:
+            self.led_signal.data = 'right'
+        #しきい値うろちょろ問題解決用
+        elif self.led_signal.data == 'left' and self.k_smooth < self.k_off:
+            self.led_signal.data = 'straight'
+        elif self.led_signal.data == 'right' and self.k_smooth > -self.k_off:
+            self.led_signal.data = 'straight'
+
+
+        self.get_logger().info(f'{self.led_signal.data}, {self.k_smooth:.3f}, {destance:.3f}, {self.state}, {self.area}')
 
 
     #cmd_velを監視して、旋回中はturningにする
