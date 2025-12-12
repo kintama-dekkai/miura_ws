@@ -4,6 +4,12 @@ from rclpy.node import Node
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Twist
 from std_msgs.msg import String
+import tf2_ros
+import tf2_py as tf2
+import tf_transformations
+from tf2_geometry_msgs import do_transform_point
+from geometry_msgs.msg import PointStamped
+
 
 
 class Curvature(Node):
@@ -23,37 +29,43 @@ class Curvature(Node):
         self.led_signal.data = 'straight'
         self.last_led_signal = None
         self.optimal_flarg = False
-        self.minimum_area = 10
+        #tf
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+        self.right_count = None
+        self.left_count = None
+        self.count = 0
+        self.count_ofset = 10
 
-        self.get_logger().info('turnsignal, curvature, k_raw, destance, state')
+
+        self.get_logger().info('turnsignal, curvature, k_raw, distance, state')
 
 
-    def curvature_from_three_points(self,pose_stamped, destance):
+    def curvature_from_three_points(self,pose_stamped,):
         eps = 1e-6
         self.state = None
         self.area = None
 
-        (x1,y1) = pose_stamped[0].pose.position.x, pose_stamped[0].pose.position.y
-        (x2,y2) = pose_stamped[len(pose_stamped)//2].pose.position.x, pose_stamped[len(pose_stamped)//2].pose.position.y
-        (x3,y3) = pose_stamped[-1].pose.position.x, pose_stamped[-1].pose.position.y
-
         #始点と終点の距離が近いときは曲率0とする
-        if destance < 0.5:
-            self.state = 'destance'
+        self.distance = math.hypot(pose_stamped[0].pose.position.x - pose_stamped[-1].pose.position.x, pose_stamped[0].pose.position.y - pose_stamped[-1].pose.position.y)
+        if self.distance < 0.5:
+            self.state = 'distance'
             self.optimal_flarg = True
             return 0.0
+
         #面積が小さいときは曲率0とする
+        (x1,y1) = pose_stamped[15].pose.position.x, pose_stamped[15].pose.position.y
+        (x2,y2) = pose_stamped[len(pose_stamped)//2].pose.position.x, pose_stamped[len(pose_stamped)//2].pose.position.y
+        (x3,y3) = pose_stamped[45].pose.position.x, pose_stamped[45].pose.position.y
         self.area = 0.5 * abs(x1*(y2-y3) + x2*(y3-y1) + x3*(y1-y2))
-        if self.minimum_area > self.area:
-            self.minimum_area = self.area
         if self.area < eps:
             self. state = 'area'
             return 0.0 
+
         #辺の長さが短いときは曲率0とする
         a = math.hypot(x2-x1, y2-y1)
         b = math.hypot(x3-x2, y3-y2)
         c = math.hypot(x3-x1, y3-y1)
-
         if a < eps or b < eps or c < eps:
             self.state = 'a,b,c'
             return 0.0
@@ -71,23 +83,55 @@ class Curvature(Node):
         return math.copysign(k, cross)
 
 
+    def majority_side_from_path(self, msg):
+        ### TF取得 ###
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                target_frame='sirius3/base_footprint',
+                source_frame=msg.header.frame_id,
+                time=rclpy.time.Time(),
+            )
+        except (tf2.LookupException, tf2.ExtrapolationException, tf2.ConnectivityException) as e:
+            self.get_logger().warning(f'TF error: {e}')
+            return
+
+        self.count = 0
+        i = 0
+        point_stamped = PointStamped()
+        point_stamped.header = msg.header  # frame_id と stamp が必要
+
+        while i < len(msg.poses):
+            point_stamped.point = msg.poses[i].pose.position
+            transformed = do_transform_point(point_stamped, transform)
+            dy = transformed.point.y
+            if dy < 0:
+                self.count += 1
+            elif dy > 0:
+                self.count -= 1
+            i+=1
+
+        if self.count > self.count_ofset:
+            return 'right'
+        elif self.count < -self.count_ofset:
+            return 'left'
+        else:
+            return 'straight'
+
+
+
     def optimal_trajectory_cb(self,msg:Path):
         self.optimal_flarg = False
         if len(msg.poses) < 3:
             return
-
-        start = msg.poses[0].pose.position
-        end = msg.poses[-1].pose.position
-        destance = math.hypot(start.x - end.x, start.y - end.y)
             
         pose_stamped = msg.poses
-        k_raw = self.curvature_from_three_points(pose_stamped, destance)
+        #k_new = self.curvature_from_three_points(pose_stamped)
+        #self.k_smooth = self.a * k_new + (1 - self.a) * self.k_smooth
 
-        scale = max(destance,1e-6) / self.d_ref
-        k_new = k_raw * scale
+        majority = self.majority_side_from_path(msg)
+        self.get_logger().info(f'majority: {majority}, count: {self.count}')
 
-        self.k_smooth = self.a * k_new + (1 - self.a) * self.k_smooth
-
+        """
         if self.k_smooth > self.k_on:
             self.led_signal.data = 'left'
         elif self.k_smooth < -self.k_on:
@@ -97,9 +141,9 @@ class Curvature(Node):
             self.led_signal.data = 'straight'
         elif self.led_signal.data == 'right' and self.k_smooth > -self.k_off:
             self.led_signal.data = 'straight'
+        """
 
-
-        self.get_logger().info(f'{self.led_signal.data}, {self.k_smooth:.3f}, {k_raw:.3f}, {destance:.3f}, {self.state}, {self.area}, {self.minimum_area}')
+        #self.get_logger().info(f'{self.led_signal.data}, {self.k_smooth:.3f}, {k_raw:.3f}, {self.destance:.3f}, {self.state}, {self.area}')
 
 
     #cmd_velを監視して、旋回中はturningにする

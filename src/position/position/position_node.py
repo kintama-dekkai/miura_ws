@@ -1,11 +1,11 @@
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import PoseStamped
 import tf2_ros
 import tf2_py as tf2
 from tf2_geometry_msgs import do_transform_pose
 from nav_msgs.msg import Path
 from std_msgs.msg import String
+import math
 
 
 class Position(Node):
@@ -16,13 +16,19 @@ class Position(Node):
 
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+        self.get_logger().info("distance, distance_x, distance_y, angle")
 
-    
+        self.last_command = None
+        self.angular_threshold = 20
+        self.distance_threshold = 0.5
+
+        self.target = 29
+
+        
+
     def optimal_trajectory_cb(self,msg:Path):
         if len(msg.poses) < 2: #点が少ないときは無視
             return
-
-        self.get_logger().info(f'Path frame: {msg.header.frame_id}')
         try:
             transform = self.tf_buffer.lookup_transform(
                 target_frame='sirius3/base_footprint',
@@ -33,21 +39,35 @@ class Position(Node):
             self.get_logger().warning(f'TF error: {e}')
             return
 
-        first_point = msg.poses[0].pose                     # PoseStamped
-        target_point = msg.poses[len(msg.poses)//2].pose     # PoseStamped
+        first_point = msg.poses[0].pose                     
+        target_point = msg.poses[self.target].pose     
 
         first_point_transformed = do_transform_pose(first_point, transform)
         target_point_transformed = do_transform_pose(target_point, transform)
 
         fptp = first_point_transformed.position
         tptp = target_point_transformed.position
+        
+        distance_x = tptp.x - fptp.x
+        distance_y = tptp.y - fptp.y
+        distance = math.hypot(distance_x, distance_y)
+        angle = math.degrees(math.atan2(distance_y, distance_x))
 
-        self.get_logger().info(
-            f'First point in base:  x={fptp.x:.2f}, y={fptp.y:.2f}'
-        )
-        self.get_logger().info(
-            f'Target point in base: x={tptp.x:.2f}, y={tptp.y:.2f}'
-        )
+
+        if -self.angular_threshold <= angle <= self.angular_threshold or distance < self.distance_threshold:
+            self.command = 'straight' 
+        elif angle > self.angular_threshold:
+            self.command = 'left'
+        else:
+            self.command = 'right'
+
+        if self.command != self.last_command:
+            led_msg = String()
+            led_msg.data = self.command
+            self.turn_signal_pub.publish(led_msg)
+            self.last_command = self.command
+        
+        self.get_logger().info(f'{self.command}, {distance:.2f}, {distance_x:.2f}, {distance_y:.2f}, {angle:.2f}')
 
 
 def main(args=None):
