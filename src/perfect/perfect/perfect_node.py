@@ -13,9 +13,9 @@ class PerfectNode(Node):
     def __init__(self):
         super().__init__('perfect_node')
         # Initialization code here
-        sub_optimal_trajectory = self.create_subscription(Path, '/optimal_trajectory', self.optimal_trajectory_cb, 10)
-        sub_cmd_vel = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_cb, 10)
-        pub_blinker_led_command = self.create_publisher(String, '/blinker_led_command', 10)
+        self.sub_optimal_trajectory = self.create_subscription(Path, '/optimal_trajectory', self.optimal_trajectory_cb, 10)
+        self.sub_cmd_vel = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_cb, 10)
+        self.blinker_pub = self.create_publisher(String, '/blinker_led_command', 10)
 
         # curvature 
         self.curvature_ofset = 15 # 曲率計算用のオフセット点数
@@ -26,6 +26,7 @@ class PerfectNode(Node):
 
         # majority 
         self.count_ofset = 10 # 判定用のオフセット
+        self.robot_width = 0.67 # ロボットの幅(m)
 
         self.count = 0
         self.tf_buffer = tf2_ros.Buffer()
@@ -35,6 +36,18 @@ class PerfectNode(Node):
         # position
         self.target = 29 # 目標点のインデックス
         self.position_limit_angle = 90.0 # 位置角度の制限値(degree)
+
+        #optimal_trajectory_cb
+        self.turn_signal = None
+        self.last_command = None
+        self.path_blinker = 'off'
+        self.last_path_time = None
+        self.path_timeout = 3.0 # パスが更新されないときのタイムアウト(sec)
+
+        #cmd_vel_cb
+        self.velocity_threshold = 0.1 # 旋回とみなす閾値(rad/s, m/s)
+
+        self.cmd_vel_flag = False
 
 
     def curvature(self, pose_stamped):
@@ -68,7 +81,10 @@ class PerfectNode(Node):
 
     
     def majority(self, msg):
-        self.count = 0
+        count = 0
+        valid = 0
+        half_width = self.robot_width / 2.0
+
         point_stamped = PointStamped()
         point_stamped.header = msg.header
 
@@ -77,29 +93,27 @@ class PerfectNode(Node):
             point_stamped.point = msg.poses[i].pose.position
             transformed = do_transform_point(point_stamped, self.transform)
             dy = transformed.point.y
-            if dy < 0:
-                self.count += 1
-            elif dy > 0:
-                self.count -= 1
+            if dy > half_width:
+                count += 1
+                valid += 1
+            elif dy < -half_width:
+                count -= 1
+                valid += 1
 
-        return self.count / limit
+        if valid == 0:
+            return 0.0 
+
+        return count / valid
 
     
     def position(self, msg):
-        first_pt = PointStamped()
-        first_pt.header = msg.header
-        first_pt.point = msg.poses[0].pose.position
-
         target_pt = PointStamped()
         target_pt.header = msg.header
         target_pt.point = msg.poses[self.target].pose.position
 
-        fpt = do_transform_point(first_pt, self.transform).point
         tpt = do_transform_point(target_pt, self.transform).point
 
-        dx = tpt.x - fpt.x
-        dy = tpt.y - fpt.y
-        angle = math.degrees(math.atan2(dy, dx))
+        angle = math.degrees(math.atan2(tpt.y, tpt.x))
 
         if abs(angle) > self.position_limit_angle:
             angle = math.copysign(self.position_limit_angle, angle)
@@ -107,6 +121,7 @@ class PerfectNode(Node):
 
 
     def optimal_trajectory_cb(self, msg: Path):
+        self.last_path_time = self.get_clock().now()
         if len(msg.poses) < 4: #点が少ないときは無視
             return
 
@@ -126,20 +141,48 @@ class PerfectNode(Node):
         majority = self.majority(msg)
         angle = self.position(msg)
 
-        score = 0.3 * majority + 0.7 * angle
-        self.get_logger().info(f'score: {score:.2f}, majority: {majority:.2f}, position: {angle:.2f}')
+        #判定
+        if majority > 0.1:
+            self.turn_signal = 'left'
+        elif majority < -0.1:
+            self.turn_signal = 'right'
+        else:
+            self.turn_signal = 'straight'
+
+        self.get_logger().info(f'turn_signal: {self.turn_signal}, majority: {majority:.2f}, position: {angle:.2f}')
 
         
 
     def cmd_vel_cb(self, msg: Twist):
         #cmd_velを監視して、旋回中はturningにする
-        angular_z = msg.angular.z
         linear_x = msg.linear.x
+        now = self.get_clock().now()
 
-        if abs(angular_z) > 0.1 and abs(linear_x) > 0.1:
-            turning = True
+        #パスがしばらく更新されていなければoffにする
+        if (
+            self.last_path_time is None or
+            (now - self.last_path_time).nanoseconds * 1e-9 > self.path_timeout
+            ):
+            effective_path = 'off'
         else:
-            turning = False
+            effective_path = self.turn_signal
+
+        #旋回判定
+        if linear_x < self.velocity_threshold:
+            cmd = 'hazard'
+        else:
+            cmd = effective_path
+
+        if cmd == self.last_command:
+            return
+
+        msg = String()
+        msg.data = cmd
+        self.blinker_pub.publish(msg)
+        self.last_command = cmd
+        
+        
+            
 
 
 

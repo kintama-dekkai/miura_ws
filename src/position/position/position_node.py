@@ -38,20 +38,13 @@ class Position(Node):
         except (tf2.LookupException, tf2.ExtrapolationException, tf2.ConnectivityException) as e:
             self.get_logger().warning(f'TF error: {e}')
             return
-
-        first_point = msg.poses[0].pose                     
+                 
         target_point = msg.poses[self.target].pose     
-
-        first_point_transformed = do_transform_pose(first_point, transform)
         target_point_transformed = do_transform_pose(target_point, transform)
-
-        fptp = first_point_transformed.position
         tptp = target_point_transformed.position
-        
-        distance_x = tptp.x - fptp.x
-        distance_y = tptp.y - fptp.y
-        distance = math.hypot(distance_x, distance_y)
-        angle = math.degrees(math.atan2(distance_y, distance_x))
+    
+        distance = math.hypot(tptp.x, tptp.y)
+        angle = math.degrees(math.atan2(tptp.y, tptp.x))
 
 
         if -self.angular_threshold <= angle <= self.angular_threshold or distance < self.distance_threshold:
@@ -67,7 +60,7 @@ class Position(Node):
             self.turn_signal_pub.publish(led_msg)
             self.last_command = self.command
         
-        self.get_logger().info(f'{self.command}, {distance:.2f}, {distance_x:.2f}, {distance_y:.2f}, {angle:.2f}')
+        self.get_logger().info(f'{self.command}, {distance:.2f}, {angle:.2f}')
 
 
 def main(args=None):
