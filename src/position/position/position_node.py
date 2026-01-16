@@ -1,34 +1,42 @@
 import rclpy
-from rclpy.node import Node
+import math
 import tf2_ros
 import tf2_py as tf2
-from tf2_geometry_msgs import do_transform_pose
+from rclpy.node import Node
+from tf2_geometry_msgs import do_transform_point
+from geometry_msgs.msg import PointStamped
 from nav_msgs.msg import Path
+from geometry_msgs.msg import Twist
 from std_msgs.msg import String
-import math
 
 
 class Position(Node):
     def __init__(self):
         super().__init__('position')
         self.sub1 = self.create_subscription(Path,'/optimal_trajectory',self.optimal_trajectory_cb,10)
-        self.turn_signal_pub = self.create_publisher(String,'/blinker_led_command',10)
+        self.sub2 = self.create_subscription(Twist,'/cmd_vel',self.cmd_vel_cb,10)
+        self.blinker_pub = self.create_publisher(String,'/blinker_led_command',10)
 
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
-        self.get_logger().info("distance, distance_x, distance_y, angle")
 
-        self.last_command = None
-        self.angular_threshold = 20
-        self.distance_threshold = 0.5
-
+        # position
+        self.on_threshold = 20
+        self.off_threshold = 10
         self.target = 29
 
-        
+        self.path_command = 'straight'
 
+        #cmd_vel
+        self.velocity_threshold = 0.1
+
+        self.last_command = None
+
+        
     def optimal_trajectory_cb(self,msg:Path):
-        if len(msg.poses) < 2: #点が少ないときは無視
+        if len(msg.poses) < self.target: #点が少ないときは無視
             return
+
         try:
             transform = self.tf_buffer.lookup_transform(
                 target_frame='sirius3/base_footprint',
@@ -39,28 +47,55 @@ class Position(Node):
             self.get_logger().warning(f'TF error: {e}')
             return
                  
-        target_point = msg.poses[self.target].pose     
-        target_point_transformed = do_transform_pose(target_point, transform)
-        tptp = target_point_transformed.position
-    
-        distance = math.hypot(tptp.x, tptp.y)
-        angle = math.degrees(math.atan2(tptp.y, tptp.x))
+        target_pt = PointStamped()
+        target_pt.header = msg.header
+        target_pt.point = msg.poses[self.target].pose.position
 
+        tpt = do_transform_point(target_pt, transform).point
 
-        if -self.angular_threshold <= angle <= self.angular_threshold or distance < self.distance_threshold:
-            self.command = 'straight' 
-        elif angle > self.angular_threshold:
-            self.command = 'left'
-        else:
-            self.command = 'right'
+        angle = math.degrees(math.atan2(tpt.y, tpt.x))
 
-        if self.command != self.last_command:
-            led_msg = String()
-            led_msg.data = self.command
-            self.turn_signal_pub.publish(led_msg)
-            self.last_command = self.command
+        if tpt.x < 0: #後ろの場合
+            self.path_command = 'left' if tpt.y > 0 else 'right'
+            return
+
+        if self.path_command == 'straight':
+            if angle > self.on_threshold:
+                self.path_command = 'left'
+            elif angle < -self.on_threshold:
+                self.path_command = 'right'
+        elif self.path_command == 'left':
+            if angle < self.off_threshold:
+                self.path_command = 'straight'
+        elif self.path_command == 'right':
+            if angle > -self.off_threshold:
+                self.path_command = 'straight'
         
-        self.get_logger().info(f'{self.command}, {distance:.2f}, {angle:.2f}')
+        
+    
+    def cmd_vel_cb(self, msg: Twist):
+        #cmd_velを監視して、旋回中はturningにする
+        linear_x = msg.linear.x
+        angular_z = msg.angular.z
+
+        #旋回判定
+        if angular_z == 0 and linear_x == 0:
+            cmd = 'off'
+            self.path_command = 'straight'  #停止中は直進に戻す
+        elif linear_x < self.velocity_threshold:
+            cmd = 'hazard'
+        else:
+            cmd = self.path_command
+
+        if cmd == self.last_command:
+            return
+
+        msg = String()
+        msg.data = cmd
+        self.blinker_pub.publish(msg)
+        self.last_command = cmd
+
+        self.get_logger().info(f'cmd={cmd},path_command={self.path_command}')
 
 
 def main(args=None):
