@@ -19,16 +19,20 @@ class Position(Node):
 
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+        self.get_logger().info('Position node started.')
 
         # position
         self.on_threshold = 20
         self.off_threshold = 10
+        self.distance_threshold = 0.3
         self.target = 29
 
         self.path_command = 'straight'
 
         #cmd_vel
-        self.velocity_threshold = 0.1
+        self.velocity_on_threshold = 0.1
+        self.velocity_off_threshold = 0.05
+        self.cmd = 'off'
 
         self.last_command = None
 
@@ -54,9 +58,11 @@ class Position(Node):
         tpt = do_transform_point(target_pt, transform).point
 
         angle = math.degrees(math.atan2(tpt.y, tpt.x))
+        distance = math.sqrt(tpt.x**2 + tpt.y**2)
+        #self.get_logger().info(f'distance={distance:.2f}, angle={angle:.2f}')
 
-        if tpt.x < 0: #後ろの場合
-            self.path_command = 'left' if tpt.y > 0 else 'right'
+        if distance < self.distance_threshold:
+            self.path_command = 'hazard'
             return
 
         if self.path_command == 'straight':
@@ -72,6 +78,7 @@ class Position(Node):
                 self.path_command = 'straight'
         
         
+        
     
     def cmd_vel_cb(self, msg: Twist):
         #cmd_velを監視して、旋回中はturningにする
@@ -80,23 +87,21 @@ class Position(Node):
 
         #旋回判定
         if angular_z == 0 and linear_x == 0:
-            cmd = 'off'
-            self.path_command = 'straight'  #停止中は直進に戻す
-        elif linear_x < self.velocity_threshold:
-            cmd = 'hazard'
-        else:
-            cmd = self.path_command
+            self.cmd = 'off'
+        elif linear_x < self.velocity_off_threshold:
+            self.cmd = 'hazard'
+        elif linear_x > self.velocity_on_threshold:
+            self.cmd = self.path_command
 
-        if cmd == self.last_command:
+        if self.cmd == self.last_command:
             return
 
         msg = String()
-        msg.data = cmd
+        msg.data = self.cmd
         self.blinker_pub.publish(msg)
-        self.last_command = cmd
+        self.last_command = self.cmd
 
-        self.get_logger().info(f'cmd={cmd},path_command={self.path_command}')
-
+        self.get_logger().info(f'cmd={self.cmd},path_command={self.path_command}')
 
 def main(args=None):
     rclpy.init(args=args)
